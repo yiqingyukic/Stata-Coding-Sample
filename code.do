@@ -3,29 +3,33 @@
 * Date: 2025/9/28
 * This is an independent exploratory study working with the Ghana Socioeconomic Panel Survey from Yale Economic Growth Center, a dataset that tracks the living standards of individuals in Ghana over time.
 
+* Set working directory
+cd "/Users/YUKIchen/Downloads/DIME RA Application_Yuki Chen/Stata" // Please feel free to change to yours
+
+
 * Input Data: Household locations
 frame create ghh
 frame change ghh
-import delimited "/Users/YUKIchen/Downloads/ghana/Ghana_household_locations.csv", varnames(1) clear
-save ghh_raw.dta, replace
+import delimited "02_Data/Raw Data/Ghana_household_locations.csv", varnames(1) clear
+save "02_Data/Working Data/ghh_raw.dta", replace
 
 * Input Data: Wave 1 consumption
 frame create w1
 frame change w1
-import delimited "/Users/YUKIchen/Downloads/ghana/hh_consumption_w1.csv", varnames(1) clear
-save w1_raw.dta, replace
+import delimited "02_Data/Raw Data/hh_consumption_w1.csv", varnames(1) clear
+save "02_Data/Working Data/w1_raw.dta", replace
 
 * Input Data: Wave 2 consumption
 frame create w2
 frame change w2
-import delimited "/Users/YUKIchen/Downloads/ghana/hh_consumption_w2.csv", varnames(1) clear
-save w2_raw.dta, replace
+import delimited "02_Data/Raw Data/hh_consumption_w2.csv", varnames(1) clear
+save "02_Data/Working Data/w2_raw.dta", replace
 
 * Input Data: Wave 3 consumption
 frame create w3
 frame change w3
-import delimited "/Users/YUKIchen/Downloads/ghana/hh_consumption_w3.csv", varnames(1) clear
-save w3_raw.dta, replace
+import delimited "02_Data/Raw Data/hh_consumption_w3.csv", varnames(1) clear
+save "02_Data/Working Data/w3_raw.dta", replace
 
 ***********************
 * Data Quality Checks *
@@ -66,7 +70,7 @@ foreach f in w1 w2 w3 {
     graph box total_cons*, ///
 	title("Consumption Distribution in `f'")
 	
-	graph export "graph_`f'.png", replace
+	graph export "03_Figures/box_cons_range_`f'.png", replace
 }
 // Checked - no negative value.
 // Medium and mean both rise across waves.  
@@ -107,7 +111,7 @@ foreach w of local waves {
 * 1. Merge w1, w2, and w3 with ghh, saved in a new frame "master"
 frame create master
 frame change master
-use ghh_raw.dta, clear
+use "02_Data/Working Data/ghh_raw.dta", clear
 
 frlink 1:1 fprimary, frame(w1)
 frget *, from(w1)
@@ -120,7 +124,7 @@ frget *, from(w3)
 
 drop w1 w2 w3
 
-save ghh_merged.dta, replace
+save "02_Data/Working Data/ghh_merged.dta", replace
 
 * 2. Reshape ghh_merged: create a survey year as a column, combine total_cons2009, total_cons2013, total_cons2018 into a single column "consumption"
 reshape long total_cons, i(fprimary) j(year)
@@ -130,8 +134,8 @@ rename total_cons consumption
 ** Step1: Import a file of PPP conversion factor 
 frame create ppp
 frame change ppp
-import delimited "/Users/YUKIchen/Downloads/ghana/API_PA.NUS.PPP_DS2_en_csv_v2_4696496.csv", rowrange(5) varnames(5) clear
-save ppp.dta, replace
+import delimited "02_Data/Raw Data/API_PA.NUS.PPP_DS2_en_csv_v2_4696496.csv", rowrange(5) varnames(5) clear
+save "02_Data/Working Data/ppp.dta", replace
 
 ** Step2: Create a tibble of Ghana Cedid - USD conversation rates across years
 frame change ppp
@@ -154,8 +158,8 @@ gen consumption_usd = consumption * usd_ppp_exchange
 ** Input cpi data
 frame create cpi
 frame change cpi
-import excel "/Users/YUKIchen/Downloads/ghana/us_consumer_price_index.xlsx", firstrow clear
-save cpi.dta, replace 
+import excel "02_Data/Raw Data/us_consumer_price_index.xlsx", firstrow clear
+save "02_Data/Working Data/cpi.dta", replace 
 
 ** Merge cpi data with ghh_merged
 frame change master
@@ -174,7 +178,7 @@ gen consumption_usd_2021 = consumption_usd * (1/cpi_conversion)
 graph box consumption_usd_2021, over(year) ///
     title("Distribution of Household Consumption (2021 USD)") ///
     ytitle("Consumption (2021 USD)")
-graph export "distribution_consumption_by_wave.png", replace
+graph export "03_Figures/box_consumption_by_wave.png", replace
 
 * 2. Plot distribution of consumption growth, by region of the country, between 2009 and 2013.
 
@@ -189,58 +193,40 @@ gen change_consump_usd_2021 = consumption_usd_2021 - lag_consumption_usd_2021
 ** Step2: Create a box plot of consumption growth, by region of the country, between 2009 and 2013
 encode region, gen(region_id)
 preserve
-keep if year == 2013
 graph box change_consump_usd_2021, over(region_id) horizontal title("Change in Consumption (2009 to 2013)")
-graph export "consumption_growth_by_region.png", replace
+graph export "03_Figures/box_consumption_growth_by_region.png", replace
 
-* 3. Calculate mean, medium, SD for the consumption (in 2021 USD) in Ghana each year (2019, 2013, 2018) and save in a new frame "stats"
-frame change master
-frame create stats
-frame change stats
-
-tempname results
-postfile `results' year mean p50 sd using cons_stats.dta, replace
-
-foreach yr in 2009 2013 2018 {
-    quietly summarize consumption_usd_2021 if year==`yr'
-    local mean = r(mean)
-    local sd   = r(sd)
-
-    quietly centile consumption_usd_2021 if year==`yr', centile(50)
-    local p50 = r(c_1)
-
-    post `results' (`yr') (`mean') (`p50') (`sd')
-}
-
-postclose `results'
-frame change stats
-use cons_stats.dta, clear
-list
-
-* 4. Calcute means of consumption_usd_2021 of each region and year (2019, 2013, 2018)
+ 
+* 3. Calcute means of consumption_usd_2021 of each region and year (2019, 2013, 2018)
 frame change master
 
-levelsof region, local(regions) 
-frame create stats2
-tempname results
-postfile `results' str20 region year mean using cons_region_stats.dta, replace
+levelsof region, local(regions)
 
+* Open postfile
+tempname results
+postfile `results' str30 region year mean using "02_Data/Working Data/cons_region_stats.dta", replace
+
+* Loop through years and regions
 foreach yr in 2009 2013 2018 {
     foreach r of local regions {
-        quietly summarize consumption_usd_2021 if year==`yr' & region=="`r'"
-        local mean = r(mean)
-        post `results' ("`r'") (`yr') (`mean')
+        quietly summarize consumption_usd_2021 if year==`yr' & region==`"`r'"'
+        local m = r(mean)
+        if !missing(`m') {
+            post `results' ("`r'") (`yr') (`m')
+        }
     }
 }
 
 postclose `results'
-** close the file and save the file. it's necessary for our next step to read
+
+
+frame create stats2
 frame change stats2
-use cons_region_stats.dta, clear
+use "02_Data/Working Data/cons_region_stats.dta", clear
 list
 
 
-* 5. Create a histogram of mean household consumption (USD 2021) of Ghana's capital (Greater Accra) across survey years (2019, 2013, 2018)
+* 4. Create a histogram of mean household consumption (USD 2021) of Ghana's capital (Greater Accra) across survey years (2019, 2013, 2018)
 frame change stats2
 preserve
 keep if region == "Greater Accra Region"
@@ -253,12 +239,13 @@ twoway (bar mean year,) ///
 	xlabel(2009 2013 2018) ///
 	legend(off) ///
     name(bar_accra, replace)
-graph export "bar_mean_consumption_accra.png", name(bar_accra) replace
+graph export "03_Figures/bar_mean_consumption_accra.png", name(bar_accra) replace
 restore
 
-* 6. Do poorer households (low baseline consumption) experience higher/lower consumption growth? 
+* 5. Do poorer households (low baseline consumption) experience higher/lower consumption growth? 
 ** Y: change_consump_usd_2021, X: lag_consumption_usd_2021
 ** Restrict to years where lag is defined (2013 & 2018)
+frame change master
 keep if inlist(year, 2013, 2018)
 reg change_consump_usd_2021 lag_consumption_usd_2021, vce(cluster region)
 
@@ -268,6 +255,6 @@ twoway (scatter change_consump_usd_2021 lag_consumption_usd_2021, msymbol(o) msi
        ytitle("Change in Consumption (2021 USD)") ///
        xtitle("Lagged Consumption (2021 USD)") ///
 
-graph export "reg_change_on_lagcons_2013_2018.png", replace
+graph export "03_Figures/reg_change_on_lagcons_scatterfit_2013_2018.png", replace
 // Most households cluster at low baseline consumption (< 500 USD), with wide variation in growth.
 // Slight upward slope - households with higher baseline consumption tend to have higher absolute growth, but the effect is not strong (p-value is not significant).
